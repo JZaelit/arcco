@@ -1201,7 +1201,7 @@ function FacilitySection({ name, locs }) {
 
 
 
-function CountScreen({data, loading, error}) {
+function CountScreen({data, loading, error, arcOpen}) {
     const fadeAnim = useRef(new Animated.Value(0)).current;
     useEffect(() => {
         if (!loading) {
@@ -1222,7 +1222,12 @@ function CountScreen({data, loading, error}) {
         )
     }
 
-    const filtered = data.filter(l => !["ARC Floor 1", "ARC Floor 2"].includes(l.LocationName));
+    // When the ARC is closed, zero out all counts so cards show as closed
+    const displayData = arcOpen
+        ? data
+        : data.map(l => ({ ...l, IsClosed: true, LastCount: 0 }));
+
+    const filtered = displayData.filter(l => !["ARC Floor 1", "ARC Floor 2"].includes(l.LocationName));
     const allFacilities = {};
     filtered.forEach( loc => {
         if (!allFacilities[loc.FacilityName]) allFacilities[loc.FacilityName] = [];
@@ -1370,7 +1375,7 @@ return( //Main app component that manages state and renders the header, main con
             />
           )}
           {activeTab === "Count" && (
-            <CountScreen data={data} loading={loading} error={error} />
+            <CountScreen data={data} loading={loading} error={error} arcOpen={arcOpen} />
           )}
           {activeTab === "Hours" && (
             <HoursScreen shakeSmartHours={shakeSmartHours} />

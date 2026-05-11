@@ -318,6 +318,101 @@ function computeSuggestions(history, schedule, allowEarlyLate = false) {
 }
 
 
+// ─── Weekly Crowd Heatmap Data (sourced from crowd_data.csv) ─────────────────
+// Occupancy % for each day across hours 6am–9pm (16 slots).
+const HEATMAP_HOURS = [6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21];
+const HEATMAP_DAYS  = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+const HEATMAP_DATA  = {
+  Mon: [30,40,50,60,65,70,75,80,85,90,95,100,95,90,80,70],
+  Tue: [25,35,45,55,60,65,70,75,80,85,90,95,90,85,75,65],
+  Wed: [20,30,40,50,55,60,65,70,75,80,85,90,85,80,70,60],
+  Thu: [30,40,52,62,68,73,78,82,87,91,96,100,94,88,78,68],
+  Fri: [20,32,44,55,60,65,70,72,74,76,80,85,75,60,45,35],
+  Sat: [10,20,35,50,60,65,62,58,55,52,50,48,42,38,30,22],
+  Sun: [8, 15,25,38,48,52,50,47,44,42,40,38,33,28,22,15],
+};
+
+// Interpolates a colour between green → yellow → red based on 0-100 occupancy.
+function heatColor(pct) {
+  if (pct <= 50) {
+    const t = pct / 50;
+    const r = Math.round(52  + t * (251 - 52));
+    const g = Math.round(211 + t * (191 - 211));
+    const b = Math.round(153 + t * (36  - 153));
+    return `rgb(${r},${g},${b})`;
+  } else {
+    const t = (pct - 50) / 50;
+    const r = Math.round(251 + t * (239 - 251));
+    const g = Math.round(191 + t * (68  - 191));
+    const b = Math.round(36  + t * (68  - 36));
+    return `rgb(${r},${g},${b})`;
+  }
+}
+
+function CrowdHeatmap() {
+  const now     = new Date();
+  const todayJS = now.getDay(); // 0=Sun … 6=Sat
+  const curHour = now.getHours();
+  // Reorder days so Monday is first (matches HEATMAP_DAYS array)
+  const todayLabel = HEATMAP_DAYS[(todayJS + 6) % 7];
+
+  return (
+    <View style={{ backgroundColor: "rgba(255,255,255,.14)", borderWidth: 1, borderColor: "rgba(255,255,255,.22)", borderRadius: 16, padding: 14, marginBottom: 16 }}>
+      <Text style={{ fontSize: 10, fontWeight: "700", color: "#64748b", letterSpacing: 1.5, textTransform: "uppercase", marginBottom: 10 }}>
+        Weekly Crowd Heatmap
+      </Text>
+
+      {/* Hour axis labels */}
+      <View style={{ flexDirection: "row", marginLeft: 30, marginBottom: 3 }}>
+        {HEATMAP_HOURS.filter((_, i) => i % 2 === 0).map(h => (
+          <Text key={h} style={{ width: 26, fontSize: 8, color: "#475569", textAlign: "center" }}>
+            {h < 12 ? `${h}a` : h === 12 ? "12p" : `${h-12}p`}
+          </Text>
+        ))}
+      </View>
+
+      {/* Rows — one per day */}
+      {HEATMAP_DAYS.map(day => (
+        <View key={day} style={{ flexDirection: "row", alignItems: "center", marginBottom: 3 }}>
+          {/* Day label */}
+          <Text style={{ width: 28, fontSize: 9, color: day === todayLabel ? "#38bdf8" : "#64748b", fontWeight: day === todayLabel ? "700" : "400" }}>
+            {day}
+          </Text>
+          {/* Cells */}
+          {HEATMAP_DATA[day].map((pct, i) => {
+            const hour   = HEATMAP_HOURS[i];
+            const isNow  = day === todayLabel && hour === curHour;
+            return (
+              <View
+                key={hour}
+                style={{
+                  width: 13, height: 18, marginHorizontal: 1.5, borderRadius: 3,
+                  backgroundColor: heatColor(pct),
+                  opacity: 0.85,
+                  borderWidth: isNow ? 1.5 : 0,
+                  borderColor: isNow ? "#ffffff" : "transparent",
+                }}
+              />
+            );
+          })}
+        </View>
+      ))}
+
+      {/* Legend */}
+      <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 6, marginTop: 8 }}>
+        <Text style={{ fontSize: 9, color: "#475569" }}>Quiet</Text>
+        {[0, 25, 50, 75, 100].map(p => (
+          <View key={p} style={{ width: 14, height: 10, borderRadius: 2, backgroundColor: heatColor(p) }} />
+        ))}
+        <Text style={{ fontSize: 9, color: "#475569" }}>Busy</Text>
+      </View>
+      <Text style={{ fontSize: 9, color: "#334155", marginTop: 5 }}>
+        White border = current hour  ·  Blue day label = today
+      </Text>
+    </View>
+  );
+}
+
 // diffrent sections of the arc
 const Arc_sections = [{
 name: "ARC", locations: [
@@ -612,7 +707,7 @@ function StatusScreen({ data, history, loading, error, arcOpen, schedule, setSho
         <Animated.ScrollView style={{ flex: 1, opacity: fadeAnim }} contentContainerStyle={{ padding: 16, paddingBottom: 40}}>
             {/* API health / stale-data banner — shown when backend is unreachable (R1 mitigation) */}
             {apiStatus === "unhealthy" && (
-              <View style={{ backgroundColor: "rgba(248,113,113,.08)", borderWidth: 1, borderColor: "rgba(248,113,113,.22)", borderRadius: 10, padding: 12, marginBottom: 12, flexDirection: "row", alignItems: "center", gap: 8 }}>
+              <View style={{ backgroundColor: "rgba(248,113,113,.28)", borderWidth: 1, borderColor: "rgba(248,113,113,.45)", borderRadius: 10, padding: 12, marginBottom: 12, flexDirection: "row", alignItems: "center", gap: 8 }}>
                 <Text style={{ fontSize: 14 }}>⚠️</Text>
                 <View style={{ flex: 1 }}>
                   <Text style={{ color: "#fca5a5", fontSize: 12, fontWeight: "600" }}>Backend unavailable</Text>
@@ -635,8 +730,8 @@ function StatusScreen({ data, history, loading, error, arcOpen, schedule, setSho
             )}
 
             {/*Best time banner to display best time to visit based on data*/}
-            {totalBusyBlocks > 0 && bestToday && (
-                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", backgroundColor: "rgba(56,189,248,.07)", borderWidth: 1, borderColor: "rgba(56,189,248,.2)", borderRadius: 12, padding: 14, marginBottom: 14 }}>
+            {arcOpen && bestToday && (
+                <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", backgroundColor: "rgba(56,189,248,.22)", borderWidth: 1, borderColor: "rgba(56,189,248,.45)", borderRadius: 12, padding: 14, marginBottom: 14 }}>
                     <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flex: 1}}>
                         <Text style={{ fontSize: 16 }}>✨</Text>
                         <Text style={{ fontSize: 12, fontWeight: "600", color: "#38bdf8" }}>
@@ -661,9 +756,9 @@ function StatusScreen({ data, history, loading, error, arcOpen, schedule, setSho
             paddingVertical: 10,
             paddingHorizontal: 14,
             borderRadius: 10,
-            backgroundColor: "rgba(56,189,248,.12)",
+            backgroundColor: "rgba(56,189,248,.28)",
             borderWidth: 1,
-            borderColor: "rgba(56,189,248,.3)",
+            borderColor: "rgba(56,189,248,.5)",
             marginBottom: 14
           }}
         >
@@ -676,7 +771,7 @@ function StatusScreen({ data, history, loading, error, arcOpen, schedule, setSho
 
 
             {/* Big meter used to display current occupancy percent or closed status*/}
-            <View style={{ backgroundColor: arcOpen ? crowd.bg : "rgba(255,255,255,.02)", borderWidth: 1, borderColor: arcOpen ? crowd.color + "28" : "rgba(255,255,255,.05)", borderRadius: 20, padding: 22, marginBottom: 14 }}>
+            <View style={{ backgroundColor: arcOpen ? crowd.bg : "rgba(255,255,255,.12)", borderWidth: 1, borderColor: arcOpen ? crowd.color + "60" : "rgba(255,255,255,.18)", borderRadius: 20, padding: 22, marginBottom: 14 }}>
                 <View>
                     <View>
                     <Text style={{ fontSize: 10, color: "#334155", letterSpacing: 1.5, marginBottom: 8, textTransform: "uppercase" }}>
@@ -711,7 +806,7 @@ function StatusScreen({ data, history, loading, error, arcOpen, schedule, setSho
             </View>
 
             {/* Timeline to show past data (every 5 minutes)*/}
-            <View style={{ backgroundColor: "rgba(255,255,255,.02)", borderWidth: 1, borderColor: "rgba(255,255,255,.05)", borderRadius: 16, padding: 16, marginBottom: 16 }}>
+            <View style={{ backgroundColor: "rgba(255,255,255,.14)", borderWidth: 1, borderColor: "rgba(255,255,255,.22)", borderRadius: 16, padding: 16, marginBottom: 16 }}>
                 <Text style={{ fontSize: 10, color: "#334155", letterSpacing: 1.5, marginBottom: 12, textTransform: "uppercase" }}>
                     Today's Timeline · {history.length} Snapshot{history.length !== 1 ? "s" : ""} Collected
                 </Text>
@@ -722,6 +817,9 @@ function StatusScreen({ data, history, loading, error, arcOpen, schedule, setSho
                 )}
             </View>
 
+            {/* Weekly crowd heatmap — always visible, uses historical CSV data */}
+            <CrowdHeatmap />
+
             {/* ARC Floor 1 & 2 cards */}
             {/* Renders individual cards for Floor 1 and Floor 2*/}
             <Text style={{ fontSize: 11, fontWeight: "700", color: "#64748b", letterSpacing: 1.5, textTransform: "uppercase", marginBottom: 12 }}>ARC Floors</Text>
@@ -731,7 +829,7 @@ function StatusScreen({ data, history, loading, error, arcOpen, schedule, setSho
             }
 
             {error && (
-                <View style ={{ marginTop: 8, backgroundColor: "rgba(248,113,113,.07)", borderWidth: 1, borderColor: "rgba(248,113,113,.18)", borderRadius: 10, padding: 12 }}>
+                <View style ={{ marginTop: 8, backgroundColor: "rgba(248,113,113,.28)", borderWidth: 1, borderColor: "rgba(248,113,113,.45)", borderRadius: 10, padding: 12 }}>
                     <Text style={{ color: "#fca5a5", fontSize: 12 }}>⚠ {error}</Text>
                 </View>
             )} 
@@ -1148,7 +1246,7 @@ function LocationCard({loc}) {
     const pct = loc.TotalCapacity > 0 ? Math.round((loc.LastCount/loc.TotalCapacity) * 100) : 0;
     const crowd = getCrowd(loc.IsClosed ? null : pct);
     return (
-        <View style = {{backgroundColor : loc.IsClosed ? "rgba(255,255,255,0.05)" : crowd.bg, borderWidth: 1, borderColor: "rgba(255,255,255,0.08)", borderRadius: 14, padding: 16, opacity: loc.IsClosed ? 0.5 : 1, marginBottom: 8}}>
+        <View style = {{backgroundColor : loc.IsClosed ? "rgba(255,255,255,0.12)" : crowd.bg, borderWidth: 1, borderColor: "rgba(255,255,255,0.22)", borderRadius: 14, padding: 16, opacity: loc.IsClosed ? 0.7 : 1, marginBottom: 8}}>
             <View style = {{flexDirection: "row", justifyContent: "space-between", alignItems: "flex-start", marginBottom: loc.IsClosed ? 0 : 10}}>
                 <View style = {{flex: 1, paddingRight: 8}}>
                     <Text style = {{fontWeight: "600",fontSize: 14, color: loc.IsClosed ? "#94a3b8" : "#1e293b"}}> {loc.LocationName} </Text>
@@ -1222,12 +1320,7 @@ function CountScreen({data, loading, error, arcOpen}) {
         )
     }
 
-    // When the ARC is closed, zero out all counts so cards show as closed
-    const displayData = arcOpen
-        ? data
-        : data.map(l => ({ ...l, IsClosed: true, LastCount: 0 }));
-
-    const filtered = displayData.filter(l => !["ARC Floor 1", "ARC Floor 2"].includes(l.LocationName));
+    const filtered = data.filter(l => !["ARC Floor 1", "ARC Floor 2"].includes(l.LocationName));
     const allFacilities = {};
     filtered.forEach( loc => {
         if (!allFacilities[loc.FacilityName]) allFacilities[loc.FacilityName] = [];
@@ -1283,6 +1376,11 @@ const[shakeSmartHours, setShakeSmartHours] = useState(Open_Hours_SS);
 const[schedule, setSchedule] = useState(emptySchedule);
 const[showSchedule, setShowSchedule] = useState(false);
 const[data, setData] = useState([]);
+// When the ARC is closed, zero out all location counts so every screen
+// (Status crowd meter, Count tab cards) shows 0 / closed rather than stale data.
+const displayData = arcOpen
+    ? data
+    : data.map(l => ({ ...l, IsClosed: true, LastCount: 0 }));
 const[lastUpdated, setLastUpdated] = useState(null);  // timestamp of last successful data fetch
 const[cachedData, setCachedData] = useState(null);    // last known-good data for stale display
 const[error, setError] = useState(null);
@@ -1363,7 +1461,7 @@ return( //Main app component that manages state and renders the header, main con
           </View>
           {activeTab === "Status" && (
             <StatusScreen
-              data={data}
+              data={displayData}
               history={history}
               loading={loading}
               error={error}
@@ -1375,7 +1473,7 @@ return( //Main app component that manages state and renders the header, main con
             />
           )}
           {activeTab === "Count" && (
-            <CountScreen data={data} loading={loading} error={error} arcOpen={arcOpen} />
+            <CountScreen data={displayData} loading={loading} error={error} arcOpen={arcOpen} />
           )}
           {activeTab === "Hours" && (
             <HoursScreen shakeSmartHours={shakeSmartHours} />

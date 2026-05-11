@@ -1,41 +1,66 @@
-ARCCO – Aztec Recreational Center Crowd Optimizer
-📌 Project Overview
+# ARCCO – Aztec Recreational Center Crowd Optimizer
 
-ARCCO is a mobile application built using React Native and FastAPI that helps SDSU students identify the least crowded times to visit the Aztec Recreation Center (ARC).
+## 📌 Project Overview
+ARCCO is a mobile application built using React Native and FastAPI 
+that helps SDSU students identify the least crowded times to visit 
+the Aztec Recreation Center (ARC).
 
-The app analyzes historical crowd data and recommends the top 3 least crowded time slots based on user-selected days and time windows.
+## 🚀 Setup Instructions
 
-🏗 Architecture Overview
-Mobile App
+### Prerequisites
+- Node.js (v18 or higher)
+- npm
+- Python 3
+- Expo Go app (for mobile testing)
 
-Built with React Native (Expo)
+### Steps to Run
 
-Collects user input (days + time range)
+1. Clone the repository:
+   git clone https://github.com/JZaelit/arcco.git
 
-Sends request to backend API
+2. Navigate into the project folder:
+   cd arcco
 
-Displays recommended time slots
+3. Install dependencies:
+   npm install
 
-Backend API
+4. Start the app:
+   npx expo start
 
-Built with FastAPI (Python)
+5. Press w to open in web browser
+   OR scan the QR code with Expo Go on your phone
 
-Processes crowd dataset
+### Running the Backend
 
-Filters by selected time window
+1. Navigate to backend folder:
+   cd backend
 
-Returns top 3 least crowded time slots
+2. Install Python dependencies:
+   pip install -r requirements.txt
 
-Data Layer
+3. Start the FastAPI server:
+   uvicorn main:app --reload
 
-CSV dataset (Sprint 1)
+## 🏗 Architecture Overview
 
-May transition to SQLite later
+### Mobile App (React Native/Expo)
+- Displays real-time ARC crowd data
+- Shows occupancy by floor and area
+- Recommends best times to visit
 
-🛠 Tech Stack
+### Backend API (FastAPI/Python)
+- Processes crowd dataset
+- Filters by selected time window
+- Returns top 3 least crowded time slots
 
-React Native (Expo)
+### Data Layer
+- CSV dataset for crowd data
 
-FastAPI
+## 🛠 Tech Stack
+- React Native (Expo)
+- FastAPI (Python 3)
+- TypeScript
 
-Python 3
+## ⚠️ Known Issues
+- Missing occupancy route warning in console (cosmetic only)
+- props.pointerEvents deprecation warning (does not affect functionality)

@@ -24,7 +24,19 @@ const Open_Hours_GYM = {
 // sunday to monday ex 8am open on sunday close 12:00am 
 //general structure for time (ARC Only) 
 
-const Open_Hours_SS = { 
+// Rock Climbing Wall hours — sourced from arc.sdsu.edu/hours (verified May 2026)
+// Keys: 0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat
+const Open_Hours_Climbing = {
+  0: { open: 13, close: 18 }, // Sun  1pm–6pm
+  1: { open: 14, close: 21 }, // Mon  2pm–9pm
+  2: { open: 10, close: 21 }, // Tue  10am–9pm
+  3: { open: 14, close: 21 }, // Wed  2pm–9pm
+  4: { open: 14, close: 21 }, // Thu  2pm–9pm
+  5: { open: 13, close: 18 }, // Fri  1pm–6pm
+  6: { open: 13, close: 18 }, // Sat  1pm–6pm
+};
+
+const Open_Hours_SS = {
 0:{ open: "10:00 AM", close: "6:00PM"},
 1:{ open: "7:00 AM", close: "9:00PM"},
 2:{ open: "7:00 AM", close: "9:00PM"},
@@ -45,6 +57,53 @@ const Crowd_Cntrl_Gage= [
 ]
 // completed now, should display how busy the gym is alongside a corosponding color which progressvely gets more red 
 
+
+// ─── API Configuration ────────────────────────────────────────────────────────
+// Update API_BASE_URL to your Railway deployment URL once hosted.
+// Keep localhost for local development.
+const API_BASE_URL = "http://localhost:8000";
+
+// Maps JS Date.getDay() index → day abbreviation used in crowd_data.csv.
+// Note: the display array uses "Thurs" but the CSV (and backend) uses "Thu".
+const DAY_CSV_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+/**
+ * Calls the FastAPI /recommendations endpoint for a single day and time window.
+ * Runs the response through the adapter/schema-validation layer before returning
+ * so the UI never receives malformed data (R2 mitigation).
+ * Throws on non-2xx responses so callers can catch and fall back gracefully.
+ */
+async function fetchRecommendations(dayIdx, startHour, endHour) {
+  const response = await fetch(`${API_BASE_URL}/recommendations`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      days: [DAY_CSV_NAMES[dayIdx]],
+      start_hour: startHour,
+      end_hour: endHour,
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(`Backend returned ${response.status}`);
+  }
+  const json = await response.json();
+
+  // ── Schema validation (R2 mitigation) ──────────────────────────────────────
+  // Validate shape inline here (mirrors api_adapter.js logic).
+  // If the backend schema changes, this is the single place to update.
+  const items = Array.isArray(json.recommendations) ? json.recommendations : [];
+  const validated = items.filter(item => {
+    const ok =
+      item && typeof item.day === "string" &&
+      typeof item.hour === "number" &&
+      typeof item.occupancy === "number";
+    if (!ok) console.warn("[ARCCO] Unexpected recommendation shape:", JSON.stringify(item));
+    return ok;
+  });
+  return validated; // [{ day, hour, occupancy }, ...]
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 //Helper Functions
 function isArcOpen() {
@@ -245,7 +304,16 @@ function computeSuggestions(history, schedule, allowEarlyLate = false) {
       suggestions.push({ day: dayIdx, hour: h, score: baseScore + timeBonus, crowdPct, readings: readings.length });
     }
   }
-  suggestions.sort((a, b) => b.score - a.score);
+  // Sort by score descending. Tiebreaker: prefer today so that when historical
+  // data is sparse (all slots score ~50), today's slots surface first rather
+  // than Sunday (day 0) which was previously always first due to loop order.
+  const todayIdx = new Date().getDay();
+  suggestions.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    if (a.day === todayIdx && b.day !== todayIdx) return -1;
+    if (b.day === todayIdx && a.day !== todayIdx) return 1;
+    return a.hour - b.hour;
+  });
   return suggestions;
 }
 
@@ -503,7 +571,7 @@ btnSecondary:{
 });
 
 //Main Screen that displays ARC gym status, crowd level, and usage trends
-function StatusScreen({ data, history, loading, error, arcOpen, schedule, setShowSchedule}) {
+function StatusScreen({ data, history, loading, error, arcOpen, schedule, setShowSchedule, apiStatus, lastUpdated }) {
     //Animated screen fade-in
     const fadeAnim = useRef(new Animated.Value(0)).current;
     useEffect(() => {
@@ -541,9 +609,32 @@ function StatusScreen({ data, history, loading, error, arcOpen, schedule, setSho
             style={{ flex: 1 }}
             imageStyle={{ opacity: 0.55 }}
         >
-        <Animated.ScrollView style={{ flex: 1, opacity: fadeAnim }} contentContainerStyle={{ padding: 16, paddingBottom: 40}}> 
-        <Animated.ScrollView style={{ flex: 1, opacity: fadeAnim }} contentContainerStyle={{ padding: 16, paddingBottom: 40}}> 
-            {/*Best time banner to display best time to visit based on data*/} 
+        <Animated.ScrollView style={{ flex: 1, opacity: fadeAnim }} contentContainerStyle={{ padding: 16, paddingBottom: 40}}>
+            {/* API health / stale-data banner — shown when backend is unreachable (R1 mitigation) */}
+            {apiStatus === "unhealthy" && (
+              <View style={{ backgroundColor: "rgba(248,113,113,.08)", borderWidth: 1, borderColor: "rgba(248,113,113,.22)", borderRadius: 10, padding: 12, marginBottom: 12, flexDirection: "row", alignItems: "center", gap: 8 }}>
+                <Text style={{ fontSize: 14 }}>⚠️</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={{ color: "#fca5a5", fontSize: 12, fontWeight: "600" }}>Backend unavailable</Text>
+                  <Text style={{ color: "#f87171", fontSize: 11, marginTop: 2 }}>
+                    {lastUpdated
+                      ? `Showing data cached at ${lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}. Start the FastAPI server to refresh.`
+                      : "Live data is unavailable. Start the FastAPI backend server."}
+                  </Text>
+                </View>
+              </View>
+            )}
+
+            {/* Last updated timestamp — shown when data is fresh */}
+            {apiStatus === "healthy" && lastUpdated && (
+              <View style={{ alignSelf: "flex-end", marginBottom: 8 }}>
+                <Text style={{ fontSize: 10, color: "#334155" }}>
+                  Updated {lastUpdated.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                </Text>
+              </View>
+            )}
+
+            {/*Best time banner to display best time to visit based on data*/}
             {totalBusyBlocks > 0 && bestToday && (
                 <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", backgroundColor: "rgba(56,189,248,.07)", borderWidth: 1, borderColor: "rgba(56,189,248,.2)", borderRadius: 12, padding: 14, marginBottom: 14 }}>
                     <View style={{ flexDirection: "row", alignItems: "center", gap: 8, flex: 1}}>
@@ -646,7 +737,6 @@ function StatusScreen({ data, history, loading, error, arcOpen, schedule, setSho
             )} 
             {/* Shows an error message if data fetch fails*/}
         </Animated.ScrollView>
-        </Animated.ScrollView>
         </ImageBackground>
     );
 }
@@ -669,14 +759,42 @@ function ScheduleModal({ visible, schedule, onSave, onClose, history }) {
   // Controls whether the modal shows the schedule editor or suggestion list
   const [tab,            setTab]            = useState("schedule");
 
+  // Backend-fetched suggestions state
+  const [apiSuggestions,    setApiSuggestions]    = useState(null);  // null = not yet fetched
+  const [apiFetching,       setApiFetching]        = useState(false);
+  const [apiSuggestError,   setApiSuggestError]    = useState(null);
+
   // Reset the local editable schedule every time the modal opens
   useEffect(() => {
-    if (visible) setLocalSchedule(JSON.parse(JSON.stringify(schedule)));
+    if (visible) {
+      setLocalSchedule(JSON.parse(JSON.stringify(schedule)));
+      setApiSuggestions(null);
+      setApiSuggestError(null);
+    }
   }, [visible]);
 
-  // Compute recommendation suggestions based on history + current schedule preferences
-  const suggestions    = computeSuggestions(history, localSchedule, allowEarlyLate);
-  const topSuggestions = suggestions.slice(0, 7);
+  // Fetch backend suggestions whenever the suggestions tab is active
+  const todayDay = new Date().getDay();
+  useEffect(() => {
+    if (tab !== "suggestions" || apiFetching || apiSuggestions !== null) return;
+    const { open, close } = Open_Hours_GYM[todayDay];
+    const startHour = Math.ceil(open);
+    const endHour   = Math.min(Math.floor(close), 23);
+    setApiFetching(true);
+    setApiSuggestError(null);
+    fetchRecommendations(todayDay, startHour, endHour)
+      .then(results => setApiSuggestions(results))
+      .catch(err => {
+        console.warn("Backend suggestions unavailable, falling back to local:", err.message);
+        setApiSuggestError("Could not reach backend — showing local estimates.");
+        setApiSuggestions(null);
+      })
+      .finally(() => setApiFetching(false));
+  }, [tab, todayDay]);
+
+  // Compute local suggestions as fallback (used when backend is unreachable)
+  const allSuggestions  = computeSuggestions(history, localSchedule, allowEarlyLate);
+  const topSuggestions  = allSuggestions.filter(s => s.day === todayDay).slice(0, 7);
 
   // Adds a busy block for the currently active day
   function addBlock() {
@@ -899,90 +1017,107 @@ function ScheduleModal({ visible, schedule, onSave, onClose, history }) {
               <>
                 {/* Summary of how suggestions are generated */}
                 <Text style={{ fontSize: 12, color: "#475569", marginBottom: 16, lineHeight: 18 }}>
-                  Based on your schedule and {history.length} crowd reading{history.length !== 1 ? "s" : ""} from{" "}
-                  <Text style={{ color: "#94a3b8", fontWeight: "500" }}>ARC Floor 1 & 2</Text>.
+                  Best times for <Text style={{ color: "#e2e8f0", fontWeight: "600" }}>{DAY_NAMES[todayDay]}</Text>{" "}
+                  {apiSuggestions ? "from backend crowd data." : `based on ${history.length} local reading${history.length !== 1 ? "s" : ""} from ARC Floor 1 & 2.`}
                 </Text>
 
-                {/* Warning if no historical data */}
-                {history.length === 0 && (
+                {/* Backend fetch error — show fallback notice */}
+                {apiSuggestError && (
                   <View style={{ backgroundColor: "rgba(251,191,36,.07)", borderWidth: 1, borderColor: "rgba(251,191,36,.2)", borderRadius: 10, padding: 12, marginBottom: 14 }}>
-                    <Text style={{ fontSize: 12, color: "#fde68a" }}>
-                      ⚠ No historical data yet — suggestions are estimated and will improve over time.
-                    </Text>
+                    <Text style={{ fontSize: 12, color: "#fde68a" }}>⚠ {apiSuggestError}</Text>
                   </View>
                 )}
 
-                {/* Suggestions list */}
-                {topSuggestions.length === 0 ? (
-                  <Text style={{ textAlign: "center", padding: 32, color: "#334155", fontSize: 13 }}>
-                    No free slots found. Try removing busy blocks or enabling early/late hours.
-                  </Text>
-                ) : (
-                  <View style={{ gap: 8 }}>
-                    {topSuggestions.map((s, idx) => {
-                      const crowd = getCrowd(s.crowdPct);
-                      const isToday = s.day === new Date().getDay();
+                {/* Loading state while fetching from backend */}
+                {apiFetching && (
+                  <View style={{ alignItems: "center", paddingVertical: 24 }}>
+                    <ActivityIndicator size="small" color="#38bdf8" />
+                    <Text style={{ fontSize: 12, color: "#334155", marginTop: 8 }}>Fetching from backend…</Text>
+                  </View>
+                )}
 
-                      return (
-                        <View
-                          key={idx}
-                          style={{
-                            flexDirection: "row",
-                            alignItems: "center",
-                            gap: 12,
-                            backgroundColor: idx === 0 ? "rgba(56,189,248,.07)" : "rgba(255,255,255,.025)",
-                            borderWidth: 1,
-                            borderColor: idx === 0 ? "rgba(56,189,248,.25)" : "rgba(255,255,255,.06)",
-                            borderRadius: 12,
-                            padding: 14
-                          }}
-                        >
-                          {/* Rank */}
+                {/* Suggestions list — backend results take priority, local fallback if unavailable */}
+                {!apiFetching && (() => {
+                  // Build display items from backend or local computation
+                  const displayItems = apiSuggestions
+                    ? apiSuggestions.map(r => ({
+                        day: todayDay,
+                        hour: r.hour,
+                        crowdPct: r.occupancy,  // backend returns raw occupancy %
+                        source: "backend",
+                      }))
+                    : topSuggestions;
+
+                  if (displayItems.length === 0) {
+                    return (
+                      <Text style={{ textAlign: "center", padding: 32, color: "#334155", fontSize: 13 }}>
+                        No free slots found. Try removing busy blocks or enabling early/late hours.
+                      </Text>
+                    );
+                  }
+
+                  return (
+                    <View style={{ gap: 8 }}>
+                      {displayItems.map((s, idx) => {
+                        const crowd = getCrowd(s.crowdPct);
+                        return (
                           <View
+                            key={idx}
                             style={{
-                              width: 28,
-                              height: 28,
-                              borderRadius: 14,
-                              backgroundColor: idx === 0 ? "rgba(56,189,248,.2)" : "rgba(255,255,255,.05)",
-                              borderWidth: 1,
-                              borderColor: idx === 0 ? "rgba(56,189,248,.4)" : "rgba(255,255,255,.08)",
+                              flexDirection: "row",
                               alignItems: "center",
-                              justifyContent: "center"
+                              gap: 12,
+                              backgroundColor: idx === 0 ? "rgba(56,189,248,.07)" : "rgba(255,255,255,.025)",
+                              borderWidth: 1,
+                              borderColor: idx === 0 ? "rgba(56,189,248,.25)" : "rgba(255,255,255,.06)",
+                              borderRadius: 12,
+                              padding: 14
                             }}
                           >
-                            <Text style={{ fontSize: 11, fontWeight: "700", color: idx === 0 ? "#38bdf8" : "#475569" }}>
-                              {idx + 1}
-                            </Text>
-                          </View>
+                            {/* Rank badge */}
+                            <View
+                              style={{
+                                width: 28, height: 28, borderRadius: 14,
+                                backgroundColor: idx === 0 ? "rgba(56,189,248,.2)" : "rgba(255,255,255,.05)",
+                                borderWidth: 1,
+                                borderColor: idx === 0 ? "rgba(56,189,248,.4)" : "rgba(255,255,255,.08)",
+                                alignItems: "center", justifyContent: "center"
+                              }}
+                            >
+                              <Text style={{ fontSize: 11, fontWeight: "700", color: idx === 0 ? "#38bdf8" : "#475569" }}>
+                                {idx + 1}
+                              </Text>
+                            </View>
 
-                          {/* Time info */}
-                          <View style={{ flex: 1 }}>
-                            <Text style={{ fontWeight: "700", fontSize: 14, color: "#e2e8f0" }}>
-                              {DAY_NAMES[s.day]}
-                            </Text>
-                            <Text style={{ fontSize: 12, color: "#64748b" }}>
-                              {fmtHour(s.hour)} – {fmtHour(s.hour + 1)}
-                            </Text>
-                          </View>
+                            {/* Time info */}
+                            <View style={{ flex: 1 }}>
+                              <Text style={{ fontWeight: "700", fontSize: 14, color: "#e2e8f0" }}>
+                                {DAY_NAMES[s.day ?? todayDay]}
+                              </Text>
+                              <Text style={{ fontSize: 12, color: "#64748b" }}>
+                                {fmtHour(s.hour)} – {fmtHour(s.hour + 1)}
+                              </Text>
+                            </View>
 
-                          {/* Crowd percentage */}
-                          <View style={{ alignItems: "flex-end" }}>
-                            {s.crowdPct !== null ? (
-                              <>
-                                <Text style={{ fontSize: 16, fontWeight: "800", color: crowd.color }}>
-                                  {Math.round(s.crowdPct)}%
-                                </Text>
-                                <Text style={{ fontSize: 10, color: crowd.color }}>{crowd.label}</Text>
-                              </>
-                            ) : (
-                              <Text style={{ fontSize: 11, color: "#334155" }}>No data yet</Text>
-                            )}
+                            {/* Crowd percentage */}
+                            <View style={{ alignItems: "flex-end" }}>
+                              {s.crowdPct != null ? (
+                                <>
+                                  <Text style={{ fontSize: 16, fontWeight: "800", color: crowd.color }}>
+                                    {Math.round(s.crowdPct)}%
+                                  </Text>
+                                  <Text style={{ fontSize: 10, color: crowd.color }}>{crowd.label}</Text>
+                                </>
+                              ) : (
+                                <Text style={{ fontSize: 11, color: "#334155" }}>No data yet</Text>
+                              )}
+                            </View>
                           </View>
-                        </View>
-                      );
-                    })}
-                  </View>
-                )}
+                        );
+                      })}
+                    </View>
+                  );
+                })()}
               </>
             )}
           </ScrollView>
@@ -1119,7 +1254,7 @@ function HoursScreen({shakeSmartHours}) {
         isLive = {true}/>
         <HoursCard
         title = "Rock Climbing Wall"
-        hoursMap = {Open_Hours_GYM}
+        hoursMap = {Open_Hours_Climbing}
         isLive = {true}/>
         <HoursCard
         title = "Shake Smart"
@@ -1128,7 +1263,7 @@ function HoursScreen({shakeSmartHours}) {
 
         <View style = {{marginTop: 8, backgroundColor: "rgba(56, 189, 248, 0.05)", borderWidth: 1, borderColor: "rgba(56, 189, 248, 0.15)", borderRadius: 10, padding: 12}}>
             <Text style = {{fontSize: 11, color: "#475569", lineHeight: 16}}>
-                ARC and Rock Climbing Wall Hours are based on the weekly schedule.
+                Hours sourced from arc.sdsu.edu/hours. Rock Climbing Wall hours differ from the main ARC — check the site for holiday or special closures.
             </Text>
         </View>
         </ScrollView>
@@ -1143,9 +1278,12 @@ const[shakeSmartHours, setShakeSmartHours] = useState(Open_Hours_SS);
 const[schedule, setSchedule] = useState(emptySchedule);
 const[showSchedule, setShowSchedule] = useState(false);
 const[data, setData] = useState([]);
-const[lastUpdated, setUpdated] = useState(null);
+const[lastUpdated, setLastUpdated] = useState(null);  // timestamp of last successful data fetch
+const[cachedData, setCachedData] = useState(null);    // last known-good data for stale display
 const[error, setError] = useState(null);
-const [loading, setLoading] = useState(false);
+const[loading, setLoading] = useState(false);
+// "healthy" | "unhealthy" | "unknown"
+const[apiStatus, setApiStatus] = useState("unknown");
 
 useEffect(() => {
   const now = new Date();
@@ -1175,44 +1313,33 @@ useEffect(() => {
 
   setHistory(mockHistory);
   setData(SAMPLE_DATA);
+  setCachedData(SAMPLE_DATA);
+  setLastUpdated(new Date());  // mark when data was last set
 }, []);
 
 
+// Set initial mock schedule (busy blocks for demo purposes)
+// TODO: replace with persisted user schedule once storage is implemented
 useEffect(() => {
   const mockSchedule = emptySchedule();
-
-  // Example: busy Monday 10–12 and 3–5
-  mockSchedule[1] = [
-    { start: 10, end: 12 },
-    { start: 15, end: 17 }
-  ];
-
-  // Example: busy today
+  mockSchedule[1] = [{ start: 10, end: 12 }, { start: 15, end: 17 }]; // Mon
   const today = new Date().getDay();
-  mockSchedule[today] = [
-    { start: 13, end: 15 }
-  ];
-
+  mockSchedule[today] = [{ start: 13, end: 15 }];
   setSchedule(mockSchedule);
 }, []);
 
-
+// API health check on mount — runs once, sets apiStatus banner
+// Also acts as early warning if the backend is not running locally
 useEffect(() => {
-  const mockSchedule = emptySchedule();
-
-  // Example: busy Monday 10–12 and 3–5
-  mockSchedule[1] = [
-    { start: 10, end: 12 },
-    { start: 15, end: 17 }
-  ];
-
-  // Example: busy today
-  const today = new Date().getDay();
-  mockSchedule[today] = [
-    { start: 13, end: 15 }
-  ];
-
-  setSchedule(mockSchedule);
+  let cancelled = false;
+  fetch(`${API_BASE_URL}/health`, { method: "GET" })
+    .then(res => {
+      if (!cancelled) setApiStatus(res.ok ? "healthy" : "unhealthy");
+    })
+    .catch(() => {
+      if (!cancelled) setApiStatus("unhealthy");
+    });
+  return () => { cancelled = true; };
 }, []);
 
 
@@ -1238,6 +1365,8 @@ return( //Main app component that manages state and renders the header, main con
               arcOpen={arcOpen}
               schedule={schedule}
               setShowSchedule={setShowSchedule}
+              apiStatus={apiStatus}
+              lastUpdated={lastUpdated}
             />
           )}
           {activeTab === "Count" && (
